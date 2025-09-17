@@ -1,0 +1,47 @@
+# 依赖项
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 构建产物
+dist/
+build/
+
+# 环境变量
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 日志
+logs/
+*.log
+
+# 操作系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 其他
+*.zip
+*.crx
+*.pem
+*.key
+*.cert
+*.tmp
+*.temp
