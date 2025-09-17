@@ -16,13 +16,61 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('json-view-btn').addEventListener('click', () => switchView('json'));
   document.getElementById('table-view-btn').addEventListener('click', () => switchView('table'));
   
-  // 监听JSON文本变化，自动更新表格视图
-  document.getElementById('cookies-json').addEventListener('input', updateTableFromJson);
+  // 监听JSON文本变化，自动更新表格视图和缓存
+  document.getElementById('cookies-json').addEventListener('input', function() {
+    updateTableFromJson();
+    cacheCookieData();
+  });
+  
+  // 全选/取消全选功能
+  document.getElementById('select-all-cookies').addEventListener('click', function() {
+    const isChecked = this.checked;
+    document.querySelectorAll('#cookies-table-body input[type="checkbox"]').forEach(checkbox => {
+      checkbox.checked = isChecked;
+    });
+  });
   
   // 初始化页面
   await loadCurrentTabUrl();
   await refreshSavedCookiesList();
+  
+  // 加载缓存的Cookie数据
+  await loadCachedCookieData();
+  
+  switchView('table')
 });
+
+/**
+ * 缓存Cookie数据到background.js
+ */
+async function cacheCookieData() {
+  const cookiesJson = document.getElementById('cookies-json').value.trim();
+  try {
+    await chrome.runtime.sendMessage({
+      action: 'cacheCookieData',
+      cookiesJson
+    });
+  } catch (error) {
+    console.warn('缓存Cookie数据失败:', error);
+  }
+}
+
+/**
+ * 从background.js加载缓存的Cookie数据
+ */
+async function loadCachedCookieData() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'loadCachedCookieData'
+    });
+    if (response && response.success && response.cachedData) {
+      document.getElementById('cookies-json').value = response.cachedData;
+      updateTableFromJson();
+    }
+  } catch (error) {
+    console.error('加载缓存的Cookie数据失败:', error);
+  }
+}
 
 /**
  * 显示消息
@@ -76,6 +124,7 @@ async function extractCookies() {
     if (response.success) {
       document.getElementById('cookies-json').value = JSON.stringify(response.cookies, null, 2);
       updateTableFromJson(); // 更新表格视图
+      await cacheCookieData(); // 缓存Cookie数据
       showMessage(`成功提取 ${response.cookies.length} 个Cookie`);
     } else {
       showMessage(`提取Cookie失败: ${response.error}`, false);
@@ -105,10 +154,27 @@ async function injectCookies() {
   try {
     const cookies = JSON.parse(cookiesJson);
     
+    // 如果当前是表格视图，检查勾选状态
+    let cookiesToInject = cookies;
+    const tableViewBtn = document.getElementById('table-view-btn');
+    
+    if (tableViewBtn.classList.contains('active')) {
+      const checkedCheckboxes = document.querySelectorAll('#cookies-table-body input[type="checkbox"]:checked');
+      
+      if (checkedCheckboxes.length > 0) {
+        // 只注入勾选的Cookie
+        const checkedIndices = Array.from(checkedCheckboxes).map(checkbox => 
+          parseInt(checkbox.id.replace('cookie-', ''))
+        );
+        
+        cookiesToInject = cookies.filter((_, index) => checkedIndices.includes(index));
+      }
+    }
+    
     const response = await chrome.runtime.sendMessage({
       action: 'injectCookies',
       url,
-      cookies
+      cookies: cookiesToInject
     });
     
     if (response.success) {
@@ -178,6 +244,7 @@ async function loadSavedCookies() {
     if (response.success) {
       document.getElementById('cookies-json').value = JSON.stringify(response.cookies, null, 2);
       updateTableFromJson(); // 更新表格视图
+      await cacheCookieData(); // 缓存Cookie数据
       showMessage(`成功加载Cookie集: ${name}`);
     } else {
       showMessage(`加载Cookie集失败: ${response.error}`, false);
@@ -220,6 +287,8 @@ async function refreshSavedCookiesList() {
           
           if (loadResponse.success) {
             document.getElementById('cookies-json').value = JSON.stringify(loadResponse.cookies, null, 2);
+            updateTableFromJson(); // 更新表格视图
+            await cacheCookieData(); // 缓存Cookie数据
             showMessage(`已加载Cookie集: ${name}`);
           }
         });
@@ -263,7 +332,7 @@ async function refreshSavedCookiesList() {
 /**
  * 格式化JSON文本
  */
-function formatJson() {
+async function formatJson() {
   const jsonInput = document.getElementById('cookies-json');
   const jsonText = jsonInput.value.trim();
   
@@ -275,6 +344,7 @@ function formatJson() {
     const parsedJson = JSON.parse(jsonText);
     jsonInput.value = JSON.stringify(parsedJson, null, 2);
     updateTableFromJson(); // 更新表格视图
+    await cacheCookieData(); // 缓存Cookie数据
     showMessage('JSON格式化成功');
   } catch (error) {
     showMessage(`JSON格式化失败: ${error.message}`, false);
@@ -333,7 +403,7 @@ function updateTableFromJson() {
     if (!Array.isArray(cookies)) {
       const errorRow = document.createElement('tr');
       const errorCell = document.createElement('td');
-      errorCell.colSpan = 7;
+      errorCell.colSpan = 8;  // 增加了一列，所以colspan也增加
       errorCell.textContent = '无效的Cookie数据格式，请确保是数组格式';
       errorCell.style.textAlign = 'center';
       errorCell.style.color = '#c62828';
@@ -346,7 +416,7 @@ function updateTableFromJson() {
     if (cookies.length === 0) {
       const emptyRow = document.createElement('tr');
       const emptyCell = document.createElement('td');
-      emptyCell.colSpan = 7;
+      emptyCell.colSpan = 8;  // 增加了一列，所以colspan也增加
       emptyCell.textContent = '暂无Cookie数据';
       emptyCell.style.textAlign = 'center';
       emptyRow.appendChild(emptyCell);
@@ -355,8 +425,23 @@ function updateTableFromJson() {
     }
     
     // 遍历Cookie数组，创建表格行
-    cookies.forEach(cookie => {
+    cookies.forEach((cookie, index) => {
       const row = document.createElement('tr');
+      row.dataset.cookieIndex = index;
+      
+      // 创建勾选框单元格
+      const checkboxCell = document.createElement('td');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'cookie-checkbox';
+      checkbox.id = `cookie-${index}`;
+      
+      // 默认勾选name为access_token和refresh_token的cookie
+      if (cookie.name === 'access_token' || cookie.name === 'refresh_token') {
+        checkbox.checked = true;
+      }
+      
+      checkboxCell.appendChild(checkbox);
       
       // 创建各列单元格
       const nameCell = createTableCell(cookie.name || '');
@@ -368,6 +453,7 @@ function updateTableFromJson() {
       const httpOnlyCell = createTableCell(cookie.httpOnly ? '✓' : '');
       
       // 添加单元格到行
+      row.appendChild(checkboxCell);
       row.appendChild(nameCell);
       row.appendChild(valueCell);
       row.appendChild(domainCell);
@@ -382,7 +468,7 @@ function updateTableFromJson() {
   } catch (error) {
     const errorRow = document.createElement('tr');
     const errorCell = document.createElement('td');
-    errorCell.colSpan = 7;
+    errorCell.colSpan = 8;  // 增加了一列，所以colspan也增加
     errorCell.textContent = `JSON解析错误: ${error.message}`;
     errorCell.style.textAlign = 'center';
     errorCell.style.color = '#c62828';

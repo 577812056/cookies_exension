@@ -53,8 +53,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
       return true;
+      
+    case 'cacheCookieData':
+      cacheCookieData(message.cookiesJson).then(() => {
+        sendResponse({ success: true });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
+      
+    case 'loadCachedCookieData':
+      loadCachedCookieData().then(cachedData => {
+        sendResponse({ success: true, cachedData });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
   }
 });
+
+/**
+ * 缓存Cookie数据到chrome.storage.local
+ * @param {string} cookiesJson - Cookie数据的JSON字符串
+ * @returns {Promise<void>}
+ */
+async function cacheCookieData(cookiesJson) {
+  if (cookiesJson) {
+    try {
+      // 验证JSON格式
+      JSON.parse(cookiesJson);
+      await chrome.storage.local.set({
+        cachedCookieData: {
+          data: cookiesJson,
+          timestamp: new Date().getTime()
+        }
+      });
+    } catch (error) {
+      // JSON格式不正确，不缓存
+      console.warn('缓存Cookie数据失败，JSON格式不正确:', error);
+      throw new Error('JSON格式不正确');
+    }
+  }
+}
+
+/**
+ * 从chrome.storage.local加载缓存的Cookie数据
+ * @returns {Promise<string|null>} - 缓存的Cookie数据JSON字符串或null
+ */
+async function loadCachedCookieData() {
+  try {
+    const result = await chrome.storage.local.get('cachedCookieData');
+    if (result.cachedCookieData && result.cachedCookieData.data) {
+      return result.cachedCookieData.data;
+    }
+    return null;
+  } catch (error) {
+      console.error('加载缓存的Cookie数据失败:', error);
+      throw error;
+    }
+  }
 
 /**
  * 从指定URL提取所有Cookie
