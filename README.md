@@ -4,6 +4,9 @@
 
 基于原作者项目：https://github.com/chunmingdeng/cookie-extension 界面优化与功能附加
 
+## 界面预览图
+![alt text](cookies_1.png) ![alt text](cookie_2.png) 
+
 ## 功能特性
 
 - 从当前页面提取 Cookie
