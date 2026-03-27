@@ -69,6 +69,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
       return true;
+
+    case 'extractStorage':
+      extractStorage(message.tabId, message.storageType).then(data => {
+        sendResponse({ success: true, data });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
   }
 });
 
@@ -271,4 +279,32 @@ async function deleteCookies(name) {
     console.error('删除Cookie失败:', error);
     throw error;
   }
+}
+
+/**
+ * 从指定标签页提取 localStorage 或 sessionStorage 的所有数据
+ * @param {number} tabId - 标签页 ID
+ * @param {'local'|'session'} storageType - 存储类型
+ * @returns {Promise<Object>} - key/value 对象
+ */
+async function extractStorage(tabId, storageType) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (type) => {
+      const storage = type === 'local' ? localStorage : sessionStorage;
+      const data = {};
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        data[key] = storage.getItem(key);
+      }
+      return data;
+    },
+    args: [storageType]
+  });
+
+  if (!results || results.length === 0) {
+    throw new Error('无法执行脚本，请确认页面已完全加载');
+  }
+
+  return results[0].result || {};
 }

@@ -1,11 +1,8 @@
 /**
  * Chrome扩展的popup脚本
- * 负责处理用户界面交互和与后台脚本的通信
  */
 
-// 等待DOM加载完成
 document.addEventListener('DOMContentLoaded', async () => {
-  // 绑定事件监听器
   document.getElementById('extract-cookies').addEventListener('click', extractCookies);
   document.getElementById('inject-cookies').addEventListener('click', injectCookies);
   document.getElementById('save-cookies').addEventListener('click', saveCookies);
@@ -15,510 +12,525 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('format-json').addEventListener('click', formatJson);
   document.getElementById('json-view-btn').addEventListener('click', () => switchView('json'));
   document.getElementById('table-view-btn').addEventListener('click', () => switchView('table'));
-  
-  // 监听JSON文本变化，自动更新表格视图和缓存
-  document.getElementById('cookies-json').addEventListener('input', function() {
+  document.getElementById('copy-cookies').addEventListener('click', copyCookies);
+  document.getElementById('copy-localstorage').addEventListener('click', () => copyStorage('local'));
+  document.getElementById('copy-sessionstorage').addEventListener('click', () => copyStorage('session'));
+
+  document.getElementById('cookies-json').addEventListener('input', function () {
     updateTableFromJson();
     cacheCookieData();
   });
-  
-  // 全选/取消全选功能
-  document.getElementById('select-all-cookies').addEventListener('click', function() {
+
+  document.getElementById('select-all-cookies').addEventListener('click', function () {
     const isChecked = this.checked;
-    document.querySelectorAll('#cookies-table-body input[type="checkbox"]').forEach(checkbox => {
-      checkbox.checked = isChecked;
+    document.querySelectorAll('#cookies-table-body input[type="checkbox"]').forEach(cb => {
+      cb.checked = isChecked;
     });
   });
-  
-  // 初始化页面
+
   await loadCurrentTabUrl();
   await refreshSavedCookiesList();
-  
-  // 加载缓存的Cookie数据
   await loadCachedCookieData();
-  
-  switchView('table')
+  switchView('table');
 });
 
-/**
- * 缓存Cookie数据到background.js
- */
-async function cacheCookieData() {
-  const cookiesJson = document.getElementById('cookies-json').value.trim();
-  try {
-    await chrome.runtime.sendMessage({
-      action: 'cacheCookieData',
-      cookiesJson
-    });
-  } catch (error) {
-    console.warn('缓存Cookie数据失败:', error);
-  }
-}
+// ── Toast ──────────────────────────────────────────────────────────────────
+
+let toastTimer = null;
 
 /**
- * 从background.js加载缓存的Cookie数据
+ * 显示 toast 提示
+ * @param {string} text
+ * @param {'success'|'error'|'warn'} type
  */
-async function loadCachedCookieData() {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'loadCachedCookieData'
-    });
-    if (response && response.success && response.cachedData) {
-      document.getElementById('cookies-json').value = response.cachedData;
-      updateTableFromJson();
-    }
-  } catch (error) {
-    console.error('加载缓存的Cookie数据失败:', error);
+function showMessage(text, type = 'success') {
+  // 兼容旧调用：第二个参数为 boolean
+  if (typeof type === 'boolean') {
+    type = type ? 'success' : 'error';
   }
-}
-
-/**
- * 显示消息
- * @param {string} text - 消息文本
- * @param {boolean} isSuccess - 是否为成功消息
- */
-function showMessage(text, isSuccess = true) {
-  const messageElement = document.getElementById('message');
-  messageElement.textContent = text;
-  messageElement.className = `message ${isSuccess ? 'success' : 'error'}`;
-  
-  // 3秒后自动隐藏消息
-  setTimeout(() => {
-    messageElement.style.display = 'none';
+  const toast = document.getElementById('toast');
+  toast.textContent = text;
+  toast.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.className = '';
   }, 3000);
 }
 
-/**
- * 加载当前标签页的URL
- */
+// ── Cookie 缓存 ────────────────────────────────────────────────────────────
+
+async function cacheCookieData() {
+  const cookiesJson = document.getElementById('cookies-json').value.trim();
+  try {
+    await chrome.runtime.sendMessage({ action: 'cacheCookieData', cookiesJson });
+  } catch (e) {
+    console.warn('缓存Cookie数据失败:', e);
+  }
+}
+
+async function loadCachedCookieData() {
+  try {
+    const res = await chrome.runtime.sendMessage({ action: 'loadCachedCookieData' });
+    if (res && res.success && res.cachedData) {
+      document.getElementById('cookies-json').value = res.cachedData;
+      updateTableFromJson();
+    }
+  } catch (e) {
+    console.error('加载缓存Cookie失败:', e);
+  }
+}
+
+// ── URL ────────────────────────────────────────────────────────────────────
+
 async function loadCurrentTabUrl() {
   try {
-    let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const currentUrlInput = document.getElementById('current-url');
-      const targetUrlInput = document.getElementById('target-url');
-      let url = new URL(tab.url);
-      currentUrlInput.value = url.origin;
-      targetUrlInput.value = url.origin;
-  } catch (error) {
-    showMessage(`加载URL失败: ${error.message}`, false);
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = new URL(tab.url);
+    document.getElementById('current-url').value = url.origin;
+    document.getElementById('target-url').value = url.origin;
+  } catch (e) {
+    showMessage(`加载URL失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 从当前页面提取Cookie
- */
+// ── 提取 Cookie ────────────────────────────────────────────────────────────
+
 async function extractCookies() {
   const url = document.getElementById('current-url').value.trim();
-  
-  if (!url) {
-    showMessage('请输入URL', false);
-    return;
-  }
-  
+  if (!url) { showMessage('请输入URL', 'error'); return; }
+
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'extractCookies',
-      url
-    });
-    
-    if (response.success) {
-      document.getElementById('cookies-json').value = JSON.stringify(response.cookies, null, 2);
-      updateTableFromJson(); // 更新表格视图
-      await cacheCookieData(); // 缓存Cookie数据
-      showMessage(`成功提取 ${response.cookies.length} 个Cookie`);
+    const res = await chrome.runtime.sendMessage({ action: 'extractCookies', url });
+    if (res.success) {
+      document.getElementById('cookies-json').value = JSON.stringify(res.cookies, null, 2);
+      updateTableFromJson();
+      await cacheCookieData();
+      showMessage(`成功提取 ${res.cookies.length} 个 Cookie`, 'success');
     } else {
-      showMessage(`提取Cookie失败: ${response.error}`, false);
+      showMessage(`提取失败: ${res.error}`, 'error');
     }
-  } catch (error) {
-    showMessage(`提取Cookie失败: ${error.message}`, false);
+  } catch (e) {
+    showMessage(`提取失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 向目标URL注入Cookie
- */
+// ── 注入 Cookie ────────────────────────────────────────────────────────────
+
 async function injectCookies() {
   const url = document.getElementById('target-url').value.trim();
   const cookiesJson = document.getElementById('cookies-json').value.trim();
-  
-  if (!url) {
-    showMessage('请输入目标URL', false);
-    return;
-  }
-  
-  if (!cookiesJson) {
-    showMessage('请输入Cookie数据', false);
-    return;
-  }
-  
+
+  if (!url) { showMessage('请输入目标URL', 'error'); return; }
+  if (!cookiesJson) { showMessage('请输入Cookie数据', 'error'); return; }
+
   try {
     const cookies = JSON.parse(cookiesJson);
-    
-    // 如果当前是表格视图，检查勾选状态
-    let cookiesToInject = cookies;
-    const tableViewBtn = document.getElementById('table-view-btn');
-    
-    if (tableViewBtn.classList.contains('active')) {
-      const checkedCheckboxes = document.querySelectorAll('#cookies-table-body input[type="checkbox"]:checked');
-      
-      if (checkedCheckboxes.length > 0) {
-        // 只注入勾选的Cookie
-        const checkedIndices = Array.from(checkedCheckboxes).map(checkbox => 
-          parseInt(checkbox.id.replace('cookie-', ''))
-        );
-        
-        cookiesToInject = cookies.filter((_, index) => checkedIndices.includes(index));
-      }
-    }
-    
-    const response = await chrome.runtime.sendMessage({
-      action: 'injectCookies',
-      url,
-      cookies: cookiesToInject
-    });
-    
-    if (response.success) {
-      showMessage('成功注入Cookie');
+    const cookiesToInject = filterCookiesBySelection(cookies);
+    const res = await chrome.runtime.sendMessage({ action: 'injectCookies', url, cookies: cookiesToInject });
+    if (res.success) {
+      showMessage('Cookie 注入成功', 'success');
     } else {
-      showMessage(`注入Cookie失败: ${response.error}`, false);
+      showMessage(`注入失败: ${res.error}`, 'error');
     }
-  } catch (error) {
-    showMessage(`解析Cookie失败: ${error.message}`, false);
+  } catch (e) {
+    showMessage(`解析Cookie失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 保存Cookie集到本地存储
- */
+// ── 复制 Cookie ────────────────────────────────────────────────────────────
+
+async function copyCookies() {
+  const cookiesJson = document.getElementById('cookies-json').value.trim();
+
+  // 判断是否获取到 Cookie 信息
+  if (!cookiesJson) {
+    showMessage('暂无 Cookie 数据，请先提取或输入 Cookie', 'warn');
+    return;
+  }
+
+  let cookies;
+  try {
+    cookies = JSON.parse(cookiesJson);
+  } catch (e) {
+    showMessage('Cookie 数据格式错误，请检查 JSON', 'error');
+    return;
+  }
+
+  if (!Array.isArray(cookies) || cookies.length === 0) {
+    showMessage('Cookie 列表为空，请先提取 Cookie', 'warn');
+    return;
+  }
+
+  const cookiesToCopy = filterCookiesBySelection(cookies);
+  if (!cookiesToCopy || cookiesToCopy.length === 0) {
+    showMessage('请至少勾选一个 Cookie', 'warn');
+    return;
+  }
+
+  const format = document.getElementById('copy-format').value;
+  const outputText = format === 'json'
+    ? buildJsonCopyText(cookiesToCopy)
+    : buildPlainCopyText(cookiesToCopy);
+
+  if (!outputText) {
+    showMessage('无法生成复制内容', 'error');
+    return;
+  }
+
+  try {
+    await copyTextToClipboard(outputText);
+    showMessage('已复制到剪贴板', 'success');
+  } catch (e) {
+    showMessage(`复制失败: ${e.message}`, 'error');
+  }
+}
+
+function filterCookiesBySelection(cookies) {
+  if (!Array.isArray(cookies)) return [];
+  const tableViewBtn = document.getElementById('table-view-btn');
+  if (!tableViewBtn || !tableViewBtn.classList.contains('active')) return cookies;
+
+  const checked = document.querySelectorAll('#cookies-table-body input[type="checkbox"]:checked');
+  if (checked.length === 0) return cookies;
+
+  const indices = Array.from(checked)
+    .map(cb => parseInt(cb.id.replace('cookie-', ''), 10))
+    .filter(i => !Number.isNaN(i));
+
+  return cookies.filter((_, i) => indices.includes(i));
+}
+
+function buildJsonCopyText(cookies) {
+  const payload = {};
+  cookies.forEach(c => { if (c && c.name) payload[c.name] = c.value ?? ''; });
+  return Object.keys(payload).length ? JSON.stringify(payload, null, 2) : '';
+}
+
+function buildPlainCopyText(cookies) {
+  const parts = cookies.filter(c => c && c.name).map(c => `${c.name}=${c.value ?? ''}`);
+  return parts.length ? `${parts.join(';')};` : '';
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(el);
+  el.focus(); el.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(el);
+  if (!ok) throw new Error('浏览器不支持复制命令');
+}
+
+// ── 保存 / 加载 Cookie 集 ──────────────────────────────────────────────────
+
 async function saveCookies() {
   const name = document.getElementById('cookie-set-name').value.trim();
   const cookiesJson = document.getElementById('cookies-json').value.trim();
-  
-  if (!name) {
-    showMessage('请输入Cookie集名称', false);
-    return;
-  }
-  
-  if (!cookiesJson) {
-    showMessage('请输入Cookie数据', false);
-    return;
-  }
-  
+  if (!name) { showMessage('请输入Cookie集名称', 'error'); return; }
+  if (!cookiesJson) { showMessage('请输入Cookie数据', 'error'); return; }
+
   try {
     const cookies = JSON.parse(cookiesJson);
-    
-    const response = await chrome.runtime.sendMessage({
-      action: 'saveCookies',
-      name,
-      cookies
-    });
-    
-    if (response.success) {
-      showMessage(`成功保存Cookie集: ${name}`);
+    const res = await chrome.runtime.sendMessage({ action: 'saveCookies', name, cookies });
+    if (res.success) {
+      showMessage(`已保存: ${name}`, 'success');
       await refreshSavedCookiesList();
     } else {
-      showMessage(`保存Cookie集失败: ${response.error}`, false);
+      showMessage(`保存失败: ${res.error}`, 'error');
     }
-  } catch (error) {
-    showMessage(`保存Cookie集失败: ${error.message}`, false);
+  } catch (e) {
+    showMessage(`保存失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 从本地存储加载Cookie集
- */
 async function loadSavedCookies() {
   const name = document.getElementById('cookie-set-name').value.trim();
-  
-  if (!name) {
-    showMessage('请输入要加载的Cookie集名称', false);
-    return;
-  }
-  
+  if (!name) { showMessage('请输入要加载的Cookie集名称', 'error'); return; }
+
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'loadCookies',
-      name
-    });
-    
-    if (response.success) {
-      document.getElementById('cookies-json').value = JSON.stringify(response.cookies, null, 2);
-      updateTableFromJson(); // 更新表格视图
-      await cacheCookieData(); // 缓存Cookie数据
-      showMessage(`成功加载Cookie集: ${name}`);
+    const res = await chrome.runtime.sendMessage({ action: 'loadCookies', name });
+    if (res.success) {
+      document.getElementById('cookies-json').value = JSON.stringify(res.cookies, null, 2);
+      updateTableFromJson();
+      await cacheCookieData();
+      showMessage(`已加载: ${name}`, 'success');
     } else {
-      showMessage(`加载Cookie集失败: ${response.error}`, false);
+      showMessage(`加载失败: ${res.error}`, 'error');
     }
-  } catch (error) {
-    showMessage(`加载Cookie集失败: ${error.message}`, false);
+  } catch (e) {
+    showMessage(`加载失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 刷新已保存的Cookie集列表
- */
 async function refreshSavedCookiesList() {
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'getSavedCookieNames'
-    });
-    
-    const listElement = document.getElementById('saved-cookies-list');
-    listElement.innerHTML = '';
-    
-    if (response.success && response.names && response.names.length > 0) {
-      response.names.forEach(name => {
-        const itemElement = document.createElement('div');
-        itemElement.className = 'saved-cookie-item';
-        
-        const nameElement = document.createElement('span');
-        nameElement.textContent = name;
-        
-        const actionsElement = document.createElement('div');
-        actionsElement.className = 'saved-cookie-actions';
-        
-        const useButton = document.createElement('button');
-        useButton.textContent = '使用';
-        useButton.addEventListener('click', async () => {
-          const loadResponse = await chrome.runtime.sendMessage({
-            action: 'loadCookies',
-            name
-          });
-          
-          if (loadResponse.success) {
-            document.getElementById('cookies-json').value = JSON.stringify(loadResponse.cookies, null, 2);
-            updateTableFromJson(); // 更新表格视图
-            await cacheCookieData(); // 缓存Cookie数据
-            showMessage(`已加载Cookie集: ${name}`);
+    const res = await chrome.runtime.sendMessage({ action: 'getSavedCookieNames' });
+    const list = document.getElementById('saved-cookies-list');
+    list.innerHTML = '';
+
+    if (res.success && res.names && res.names.length > 0) {
+      res.names.forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'saved-item';
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'saved-item-name';
+        nameEl.textContent = name;
+        nameEl.title = name;
+
+        const actions = document.createElement('div');
+        actions.className = 'saved-item-actions';
+
+        const useBtn = document.createElement('button');
+        useBtn.className = 'btn btn-ghost btn-sm';
+        useBtn.textContent = '使用';
+        useBtn.addEventListener('click', async () => {
+          const r = await chrome.runtime.sendMessage({ action: 'loadCookies', name });
+          if (r.success) {
+            document.getElementById('cookies-json').value = JSON.stringify(r.cookies, null, 2);
+            updateTableFromJson();
+            await cacheCookieData();
+            showMessage(`已加载: ${name}`, 'success');
           }
         });
-        
-        const deleteButton = document.createElement('button');
-        deleteButton.textContent = '删除';
-        deleteButton.className = 'delete';
-        deleteButton.addEventListener('click', async () => {
-          if (confirm(`确定要删除Cookie集: ${name}吗？`)) {
-            const deleteResponse = await chrome.runtime.sendMessage({
-              action: 'deleteCookies',
-              name
-            });
-            
-            if (deleteResponse.success) {
-              showMessage(`已删除Cookie集: ${name}`);
-              refreshSavedCookiesList(); // 刷新列表
-            } else {
-              showMessage(`删除Cookie集失败: ${deleteResponse.error}`, false);
-            }
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-danger btn-sm';
+        delBtn.textContent = '删除';
+        delBtn.addEventListener('click', async () => {
+          if (!confirm(`确定删除 Cookie 集「${name}」？`)) return;
+          const r = await chrome.runtime.sendMessage({ action: 'deleteCookies', name });
+          if (r.success) {
+            showMessage(`已删除: ${name}`, 'success');
+            refreshSavedCookiesList();
+          } else {
+            showMessage(`删除失败: ${r.error}`, 'error');
           }
         });
-        
-        actionsElement.appendChild(useButton);
-        actionsElement.appendChild(deleteButton);
-        itemElement.appendChild(nameElement);
-        itemElement.appendChild(actionsElement);
-        listElement.appendChild(itemElement);
+
+        actions.appendChild(useBtn);
+        actions.appendChild(delBtn);
+        item.appendChild(nameEl);
+        item.appendChild(actions);
+        list.appendChild(item);
       });
     } else {
-      const emptyElement = document.createElement('div');
-      emptyElement.className = 'saved-cookie-item';
-      emptyElement.textContent = '暂无保存的Cookie集';
-      listElement.appendChild(emptyElement);
+      list.innerHTML = '<div class="empty-state">暂无保存的 Cookie 集</div>';
     }
-  } catch (error) {
-    showMessage(`刷新Cookie集列表失败: ${error.message}`, false);
+  } catch (e) {
+    showMessage(`刷新列表失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 格式化JSON文本
- */
+// ── JSON 格式化 ────────────────────────────────────────────────────────────
+
 async function formatJson() {
-  const jsonInput = document.getElementById('cookies-json');
-  const jsonText = jsonInput.value.trim();
-  
-  if (!jsonText) {
-    return;
-  }
-  
+  const el = document.getElementById('cookies-json');
+  if (!el.value.trim()) return;
   try {
-    const parsedJson = JSON.parse(jsonText);
-    jsonInput.value = JSON.stringify(parsedJson, null, 2);
-    updateTableFromJson(); // 更新表格视图
-    await cacheCookieData(); // 缓存Cookie数据
-    showMessage('JSON格式化成功');
-  } catch (error) {
-    showMessage(`JSON格式化失败: ${error.message}`, false);
+    el.value = JSON.stringify(JSON.parse(el.value), null, 2);
+    updateTableFromJson();
+    await cacheCookieData();
+    showMessage('格式化成功', 'success');
+  } catch (e) {
+    showMessage(`格式化失败: ${e.message}`, 'error');
   }
 }
 
-/**
- * 切换Cookie视图模式
- * @param {string} view - 视图类型 ('json' 或 'table')
- */
+// ── 视图切换 ───────────────────────────────────────────────────────────────
+
 function switchView(view) {
-  const jsonViewBtn = document.getElementById('json-view-btn');
-  const tableViewBtn = document.getElementById('table-view-btn');
-  const cookiesJson = document.getElementById('cookies-json');
-  const cookiesTableContainer = document.getElementById('cookies-table-container');
-  
+  const jsonBtn = document.getElementById('json-view-btn');
+  const tableBtn = document.getElementById('table-view-btn');
+  const jsonEl = document.getElementById('cookies-json');
+  const tableEl = document.getElementById('cookies-table-container');
+
   if (view === 'json') {
-    jsonViewBtn.classList.add('active');
-    tableViewBtn.classList.remove('active');
-    cookiesJson.style.display = 'block';
-    cookiesTableContainer.classList.remove('active');
-  } else if (view === 'table') {
-    jsonViewBtn.classList.remove('active');
-    tableViewBtn.classList.add('active');
-    cookiesJson.style.display = 'none';
-    cookiesTableContainer.classList.add('active');
-    updateTableFromJson(); // 确保表格内容是最新的
+    jsonBtn.classList.add('active');
+    tableBtn.classList.remove('active');
+    jsonEl.style.display = 'block';
+    tableEl.classList.remove('active');
+  } else {
+    tableBtn.classList.add('active');
+    jsonBtn.classList.remove('active');
+    jsonEl.style.display = 'none';
+    tableEl.classList.add('active');
+    updateTableFromJson();
   }
 }
 
-/**
- * 从JSON文本更新表格视图
- */
+// ── 表格更新 ───────────────────────────────────────────────────────────────
+
 function updateTableFromJson() {
   const jsonText = document.getElementById('cookies-json').value.trim();
-  const tableBody = document.getElementById('cookies-table-body');
-  
-  // 清空表格内容
-  tableBody.innerHTML = '';
-  
-  if (!jsonText) {
-    const emptyRow = document.createElement('tr');
-    const emptyCell = document.createElement('td');
-    emptyCell.colSpan = 7;
-    emptyCell.textContent = '暂无Cookie数据';
-    emptyCell.style.textAlign = 'center';
-    emptyRow.appendChild(emptyCell);
-    tableBody.appendChild(emptyRow);
+  const tbody = document.getElementById('cookies-table-body');
+  const countBadge = document.getElementById('cookie-count');
+  tbody.innerHTML = '';
+
+  const makeEmpty = (msg, isError = false) => {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8;
+    td.textContent = msg;
+    td.style.cssText = `text-align:center;padding:16px;color:${isError ? '#dc2626' : '#9ca3af'}`;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    countBadge.textContent = '0';
+  };
+
+  if (!jsonText) { makeEmpty('暂无 Cookie 数据'); return; }
+
+  let cookies;
+  try {
+    cookies = JSON.parse(jsonText);
+  } catch (e) {
+    makeEmpty(`JSON 解析错误: ${e.message}`, true);
     return;
   }
-  
-  try {
-    const cookies = JSON.parse(jsonText);
-    
-    // 检查是否是数组
-    if (!Array.isArray(cookies)) {
-      const errorRow = document.createElement('tr');
-      const errorCell = document.createElement('td');
-      errorCell.colSpan = 8;  // 增加了一列，所以colspan也增加
-      errorCell.textContent = '无效的Cookie数据格式，请确保是数组格式';
-      errorCell.style.textAlign = 'center';
-      errorCell.style.color = '#c62828';
-      errorRow.appendChild(errorCell);
-      tableBody.appendChild(errorRow);
-      return;
-    }
-    
-    // 如果没有Cookie数据
-    if (cookies.length === 0) {
-      const emptyRow = document.createElement('tr');
-      const emptyCell = document.createElement('td');
-      emptyCell.colSpan = 8;  // 增加了一列，所以colspan也增加
-      emptyCell.textContent = '暂无Cookie数据';
-      emptyCell.style.textAlign = 'center';
-      emptyRow.appendChild(emptyCell);
-      tableBody.appendChild(emptyRow);
-      return;
-    }
-    
-    // 遍历Cookie数组，创建表格行
-    cookies.forEach((cookie, index) => {
-      const row = document.createElement('tr');
-      row.dataset.cookieIndex = index;
-      
-      // 创建勾选框单元格
-      const checkboxCell = document.createElement('td');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'cookie-checkbox';
-      checkbox.id = `cookie-${index}`;
-      
-      // 默认勾选name为access_token和refresh_token的cookie
-      if (cookie.name === 'access_token' || cookie.name === 'refresh_token') {
-        checkbox.checked = true;
-      }
-      
-      checkboxCell.appendChild(checkbox);
-      
-      // 创建各列单元格
-      const nameCell = createTableCell(cookie.name || '');
-      const valueCell = createTableCell(cookie.value || '', true);
-      const domainCell = createTableCell(cookie.domain || '');
-      const pathCell = createTableCell(cookie.path || '');
-      const expirationCell = createTableCell(formatExpirationDate(cookie.expirationDate));
-      const secureCell = createTableCell(cookie.secure ? '✓' : '');
-      const httpOnlyCell = createTableCell(cookie.httpOnly ? '✓' : '');
-      
-      // 添加单元格到行
-      row.appendChild(checkboxCell);
-      row.appendChild(nameCell);
-      row.appendChild(valueCell);
-      row.appendChild(domainCell);
-      row.appendChild(pathCell);
-      row.appendChild(expirationCell);
-      row.appendChild(secureCell);
-      row.appendChild(httpOnlyCell);
-      
-      // 添加行到表格
-      tableBody.appendChild(row);
-    });
-  } catch (error) {
-    const errorRow = document.createElement('tr');
-    const errorCell = document.createElement('td');
-    errorCell.colSpan = 8;  // 增加了一列，所以colspan也增加
-    errorCell.textContent = `JSON解析错误: ${error.message}`;
-    errorCell.style.textAlign = 'center';
-    errorCell.style.color = '#c62828';
-    errorRow.appendChild(errorCell);
-    tableBody.appendChild(errorRow);
-  }
+
+  if (!Array.isArray(cookies)) { makeEmpty('数据格式错误，需要数组格式', true); return; }
+  if (cookies.length === 0) { makeEmpty('暂无 Cookie 数据'); return; }
+
+  countBadge.textContent = cookies.length;
+
+  cookies.forEach((cookie, index) => {
+    const tr = document.createElement('tr');
+
+    const cbTd = document.createElement('td');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = `cookie-${index}`;
+    if (cookie.name === 'access_token' || cookie.name === 'refresh_token') cb.checked = true;
+    cbTd.appendChild(cb);
+
+    tr.appendChild(cbTd);
+    tr.appendChild(makeCell(cookie.name || ''));
+    tr.appendChild(makeCell(cookie.value || '', true));
+    tr.appendChild(makeCell(cookie.domain || ''));
+    tr.appendChild(makeCell(cookie.path || ''));
+    tr.appendChild(makeCell(formatExpiry(cookie.expirationDate)));
+    tr.appendChild(makeCell(cookie.secure ? '✓' : ''));
+    tr.appendChild(makeCell(cookie.httpOnly ? '✓' : ''));
+
+    tbody.appendChild(tr);
+  });
 }
 
-/**
- * 创建表格单元格
- * @param {string} content - 单元格内容
- * @param {boolean} isValue - 是否为Cookie值（需要特殊处理）
- * @returns {HTMLElement} - td元素
- */
-function createTableCell(content, isValue = false) {
-  const cell = document.createElement('td');
-  
-  // 如果内容较长，添加截断处理和工具提示
+function makeCell(content, isValue = false) {
+  const td = document.createElement('td');
   if (typeof content === 'string' && content.length > 50) {
     const span = document.createElement('span');
     span.className = 'truncate';
     span.textContent = content;
     span.title = content;
-    cell.appendChild(span);
+    td.appendChild(span);
   } else {
-    cell.textContent = content;
-    
-    // 为Cookie值添加工具提示
-    if (isValue && content) {
-      cell.title = content;
-    }
+    td.textContent = content;
+    if (isValue && content) td.title = content;
   }
-  
-  return cell;
+  return td;
+}
+
+function formatExpiry(ts) {
+  if (!ts) return '会话';
+  try { return new Date(ts * 1000).toLocaleString('zh-CN'); }
+  catch { return '无效'; }
+}
+
+// ── LocalStorage / SessionStorage ─────────────────────────────────────────
+
+/**
+ * 读取当前标签页的 localStorage 或 sessionStorage 并复制到剪贴板
+ * @param {'local'|'session'} storageType
+ */
+async function copyStorage(storageType) {
+  const label = storageType === 'local' ? 'LocalStorage' : 'SessionStorage';
+
+  let tab;
+  try {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  } catch (e) {
+    showMessage('无法获取当前标签页', 'error');
+    return;
+  }
+
+  if (!tab || !tab.id) {
+    showMessage('无法获取当前标签页', 'error');
+    return;
+  }
+
+  // chrome-extension:// / chrome:// 等页面无法注入脚本
+  if (!tab.url || !/^https?:\/\//.test(tab.url)) {
+    showMessage(`当前页面不支持读取 ${label}`, 'warn');
+    return;
+  }
+
+  try {
+    const res = await chrome.runtime.sendMessage({
+      action: 'extractStorage',
+      tabId: tab.id,
+      storageType
+    });
+
+    if (!res.success) {
+      showMessage(`读取 ${label} 失败: ${res.error}`, 'error');
+      return;
+    }
+
+    const data = res.data;
+    const keys = Object.keys(data);
+
+    if (keys.length === 0) {
+      showMessage(`${label} 为空`, 'warn');
+      renderStoragePreview({});
+      return;
+    }
+
+    // 更新预览表格
+    renderStoragePreview(data);
+
+    // 复制 JSON 到剪贴板
+    const text = JSON.stringify(data, null, 2);
+    await copyTextToClipboard(text);
+
+    document.getElementById('storage-count').textContent = keys.length;
+    showMessage(`已复制 ${label}（${keys.length} 条）`, 'success');
+  } catch (e) {
+    showMessage(`操作失败: ${e.message}`, 'error');
+  }
 }
 
 /**
- * 格式化过期时间
- * @param {number} timestamp - Unix时间戳
- * @returns {string} - 格式化后的时间字符串
+ * 渲染存储数据预览表格
+ * @param {Object} data
  */
-function formatExpirationDate(timestamp) {
-  if (!timestamp) {
-    return '会话结束';
+function renderStoragePreview(data) {
+  const preview = document.getElementById('storage-preview');
+  const tbody = document.getElementById('storage-table-body');
+  const helper = document.getElementById('storage-helper');
+  tbody.innerHTML = '';
+
+  const keys = Object.keys(data);
+
+  if (keys.length === 0) {
+    preview.style.display = 'none';
+    helper.textContent = '该存储为空';
+    document.getElementById('storage-count').textContent = '0';
+    return;
   }
-  
-  try {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleString('zh-CN');
-  } catch (error) {
-    return '无效时间';
-  }
+
+  keys.forEach(key => {
+    const tr = document.createElement('tr');
+    tr.appendChild(makeCell(key));
+    tr.appendChild(makeCell(data[key] ?? '', true));
+    tbody.appendChild(tr);
+  });
+
+  preview.style.display = 'block';
+  helper.textContent = `共 ${keys.length} 条数据，已复制为 JSON 格式`;
 }

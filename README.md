@@ -1,90 +1,81 @@
 # Cookie Maker
 
-一个用于跨标签页提取和注入Cookie的Chrome扩展工具，提供直观的Cookie管理界面和数据持久化功能。
+一个用于跨标签页提取和注入 Cookie 的 Chrome 扩展工具，提供直观的 Cookie 管理界面、数据持久化功能，以及浏览器本地存储的读取与复制能力。
+
+基于原作者项目：https://github.com/chunmingdeng/cookie-extension 界面优化与功能附加
 
 ## 功能特性
 
-- 从当前页面提取Cookie
-- 向指定URL注入Cookie
-- 保存Cookie集到本地存储
-- 加载已保存的Cookie集
-- 格式化JSON数据
-- 支持JSON视图和表格视图切换
-- 表格视图支持Cookie勾选和筛选
-- 自动缓存Cookie数据，切换标签页不丢失
-- 支持跨标签页操作Cookie
+- 从当前页面提取 Cookie
+- 向指定 URL 注入 Cookie
+- 支持 JSON 视图和表格视图切换，表格视图支持勾选筛选
+- 复制 Cookie 为 JSON 格式或文本格式（key=value;）
+- 保存 / 加载 / 删除 Cookie 集到本地存储
+- 自动缓存 Cookie 数据，切换标签页不丢失
+- 一键复制当前页面的 LocalStorage 数据
+- 一键复制当前页面的 SessionStorage 数据
+- 存储数据读取后在面板内预览（key/value 表格）
 
 ## 安装方法
-
-### 从Chrome应用商店安装
-（未来可能会发布到Chrome应用商店）
 
 ### 从源代码安装
 
 1. 克隆或下载本项目代码到本地
-2. 打开Chrome浏览器，访问 `chrome://extensions/`
-3. 开启右上角的 "开发者模式"
-4. 点击 "加载已解压的扩展程序"
+2. 打开 Chrome 浏览器，访问 `chrome://extensions/`
+3. 开启右上角的「开发者模式」
+4. 点击「加载已解压的扩展程序」
 5. 选择本项目的根目录
-6. 扩展将被添加到Chrome浏览器中
+6. 扩展将被添加到 Chrome 浏览器中
 
 ## 使用说明
 
-### 基本操作
-1. 点击Chrome浏览器工具栏中的Cookie Maker图标打开扩展面板
-2. 默认会显示当前标签页的URL
-3. **提取Cookie**：点击 "提取当前页面Cookie" 按钮，扩展会自动提取当前页面的所有Cookie
-4. **注入Cookie**：在 "目标URL" 输入框中输入目标网站地址，确保Cookie数据已正确填写，然后点击 "向目标URL注入Cookie" 按钮
-5. **保存Cookie集**：输入Cookie集名称，点击 "保存Cookie集" 按钮
-6. **加载Cookie集**：输入要加载的Cookie集名称，点击 "加载Cookie集" 按钮
-7. **格式化JSON**：点击 "格式化JSON" 按钮，使JSON数据更易于阅读
+### Cookie 操作
 
-### 视图切换功能
-1. **JSON视图**：显示原始的JSON格式Cookie数据，支持手动编辑
-2. **表格视图**：以表格形式展示Cookie数据，更直观易读
-   - 表格视图会默认勾选 `access_token` 和 `refresh_token` 类型的Cookie
-   - 在表格视图下，点击 "向目标URL注入Cookie" 只会注入勾选的Cookie
+1. 点击工具栏中的 Cookie Maker 图标打开面板，默认加载当前标签页 URL
+2. **提取 Cookie**：点击「提取 Cookie」按钮，自动提取当前页面所有 Cookie
+3. **注入 Cookie**：填写目标 URL，确认 Cookie 数据后点击「注入到目标 URL」
+4. **复制 Cookie**：选择格式（JSON / 文本），点击「复制」按钮
+   - 若 Cookie 数据为空，会给出提示
+   - 表格视图下仅复制已勾选的条目
+5. **格式化 JSON**：点击「格式化 JSON」使数据更易阅读
 
-### 数据缓存功能
-- 扩展会自动缓存您正在编辑的Cookie数据到 `chrome.storage.local`
-- 缓存功能在后台脚本(`background.js`)中实现，确保数据持久化
-- 即使关闭或切换标签页后重新打开扩展，之前的数据也能被正确恢复
-- 所有可能修改Cookie数据的操作（提取、加载、格式化、输入）都会自动触发缓存更新
+### 视图切换
 
-### 已保存Cookie集管理
-- 扩展面板下方会显示所有已保存的Cookie集列表
-- 点击 "使用" 按钮可直接加载对应Cookie集
-- 点击 "删除" 按钮可移除不需要的Cookie集
+- **JSON 视图**：显示原始 JSON，支持手动编辑
+- **表格视图**：以表格展示，默认勾选 `access_token` 和 `refresh_token`
+
+### LocalStorage / SessionStorage 复制
+
+1. 切换到目标页面标签
+2. 打开扩展面板，在「浏览器存储」卡片中点击对应按钮
+3. 数据将以 JSON 格式复制到剪贴板，并在面板内展示预览
+4. 注意：`chrome://` 等非 http/https 页面不支持此功能
+
+### Cookie 集管理
+
+- 输入集合名称后点击「保存」，将当前 Cookie 数据持久化
+- 点击「加载」或列表中的「使用」按钮恢复已保存的数据
+- 点击「删除」移除不需要的 Cookie 集
 
 ## 权限说明
 
-该扩展需要以下权限：
-
-- `cookies`：用于读取和修改Cookie
-- `activeTab`：用于获取当前活动标签页信息
-- `storage`：用于在本地存储保存的Cookie集和缓存数据
-- `scripting`：用于在页面中执行脚本
-- `<all_urls>`：允许扩展操作所有网站的Cookie
+| 权限 | 用途 |
+|------|------|
+| `cookies` | 读取和修改 Cookie |
+| `activeTab` | 获取当前活动标签页信息 |
+| `tabs` | 获取标签页 ID 用于注入脚本 |
+| `storage` | 本地持久化 Cookie 集和缓存数据 |
+| `scripting` | 在页面上下文中执行脚本以读取 Storage |
+| `<all_urls>` | 允许操作所有网站的 Cookie |
 
 ## 注意事项
 
-1. 请谨慎使用此扩展，不要向不信任的网站注入Cookie
-2. 注入Cookie可能会导致您的账号安全风险，请确保您了解操作的后果
-3. 扩展仅在本地存储Cookie数据，不会上传到任何服务器
-4. 缓存数据存储在浏览器的本地存储中，清除浏览器数据可能会导致缓存丢失
-
-## 开发指南
-
-如果您想参与开发或修改此扩展，请按照以下步骤：
-
-1. 确保已安装Node.js和npm
-2. 克隆项目代码
-3. 在项目目录下进行开发
-4. 修改完成后，重新加载扩展进行测试
+1. 请勿向不信任的网站注入 Cookie，操作前确认安全风险
+2. 扩展仅在本地存储数据，不会上传到任何服务器
+3. 清除浏览器数据可能导致已保存的 Cookie 集丢失
 
 ## 技术栈
 
-- HTML5
-- CSS3
-- JavaScript
-- Chrome Extension API
+- HTML5 / CSS3 / JavaScript
+- Chrome Extension Manifest V3
+- Chrome Extension API（cookies、scripting、storage、tabs）
